@@ -1,0 +1,9 @@
+{
+  "name": "sgp4-api",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "satellite.js": "latest"
+  }
+}
+add package.json
