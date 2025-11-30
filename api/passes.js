@@ -1,4 +1,4 @@
-// api/passes.js
+// api/passes.js — финальная рабочая версия (декабрь 2025)
 import { twoline2satrec, propagate, gstime, eciToGeodetic } from 'satellite.js';
 
 export default function handler(req, res) {
@@ -8,49 +8,57 @@ export default function handler(req, res) {
   const { tle1, tle2, lat = '55.7558', lon = '37.6173', days = '7' } = req.query;
 
   if (!tle1 || !tle2) {
-    return res.status(400).json({ error: 'tle1 and tle2 parameters are required' });
+    return res.status(400).json({ error: 'tle1 и tle2 обязательны' });
   }
 
   try {
-    const satrec = twoline2satrec(tle1, tle2);
-    const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + Number(days) * 86400000);
+    const satrec = twoline2satrec(tle1.trim(), tle2.trim());
+
+    const start = new Date();
+    const end = new Date(start.getTime() + Number(days) * 86400000);
     const passes = [];
+    let current = new Date(start);
 
-    for (let date = new Date(startDate); date <= endDate; date.setMinutes(date.getMinutes() + 3)) {
-      const position = propagate(satrec, date);
-      if (position.position === false) continue;
+    while (current <= end) {
+      const result = propagate(satrec, current);
 
-      const gmst = gstime(date);
-      const coord = eciToGeodetic(position.position, gmst);
+      // Ключевая проверка — спасает от краша
+      if (result.position && result.velocity) {
+        const gmst = gstime(current);
+        const pos = eciToGeodetic(result.position, gmst);
 
-      const satLat = coord.latitude * 180 / Math.PI;
-      const satLon = coord.longitude * 180 / Math.PI;
-      const height = coord.height;
+        const satLat = pos.latitude * 180 / Math.PI;
+        const satLon = pos.longitude * 180 / Math.PI;
+        const alt = pos.height;
 
-      if (height > 100 &&
-          Math.abs(satLat - Number(lat)) < 20 &&
-          Math.abs(satLon - Number(lon)) < 20) {
-        passes.push({
-          time: date.toISOString(),
-          lat: satLat.toFixed(4),
-          lon: satLon.toFixed(4),
-          alt: height.toFixed(0) + ' km'
-        });
+        if (alt > 100 && 
+           Math.abs(satLat - Number(lat)) < 25 && 
+           Math.abs(satLon - Number(lon)) < 25) {
+          passes.push({
+            time: current.toISOString(),
+            lat: satLat.toFixed(4),
+            lon: satLon.toFixed(4),
+            alt: Math.round(alt) + ' km'
+          });
+        }
       }
+      // Шаг 3 минуты — быстро и точно
+      current.setMinutes(current.getMinutes() + 3);
     }
 
     res.status(200).json({
       success: true,
-      location: { lat: Number(lat), lon: Number(lon) },
-      period_days: Number(days),
+      location: `${lat}, ${lon}`,
+      days: Number(days),
       passes_found: passes.length,
-      passes
+      passes: passes.slice(0, 100)
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Calculation failed', message: err.message });
+    res.status(500).json({ 
+      error: 'Расчёт не удался', 
+      details: err.message 
+    });
   }
 }
 
