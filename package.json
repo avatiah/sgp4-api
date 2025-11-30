@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "satellite.js": "latest"
+    "satellite.js": "^5.0.0"
   }
 }
