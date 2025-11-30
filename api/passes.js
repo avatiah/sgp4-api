@@ -1,50 +1,65 @@
-import { propagate, twoline2satrec, gstime, eciToGeodetic } from 'satellite.js';
+// api/passes.js
+import { propagate, twoline2satrec, gstime, eciToGeodetic, degToRad, ecfToLookAngles } from 'satellite.js';
 
 export default function handler(req, res) {
-  const { tle1, tle2, lat = 55.7558, lon = 37.6173, days = 7 } = req.query;
+    // Получаем TLE и координаты наблюдателя.
+    const { tle1, tle2, lat, lon, days } = req.query;
 
-  if (!tle1 || !tle2) {
-    return res.status(400).json({ error: "TLE lines are required" });
-  }
-
-  const satrec = twoline2satrec(tle1, tle2);
-  const start = new Date();
-  const end = new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
-  const passes = [];
-
-  for (let t = start; t <= end; t.setMinutes(t.getMinutes() + 1)) {
-    const positionAndVelocity = propagate(satrec, t);
-    if (positionAndVelocity.position === false) continue;
-
-    const positionEci = positionAndVelocity.position;
-    const gmst = gstime(t);
-    const positionGd = eciToGeodetic(positionEci, gmst);
-
-    const latitude = positionGd.latitude * (180 / Math.PI);
-    const longitude = positionGd.longitude * (180 / Math.PI);
-    const height = positionGd.height;
-
-    // Виден ли спутник с земли?
-    if (height > 100 && 
-        Math.abs(latitude - parseFloat(lat)) < 15 && 
-        Math.abs(longitude - parseFloat(lon)) < 15) {
-      
-      passes.push({
-        time: t.toISOString(),
-        lat: latitude.toFixed(4),
-        lon: longitude.toFixed(4),
-        alt: height.toFixed(1)
-      });
+    if (!tle1 || !tle2) {
+        return res.status(400).json({ error: "TLE lines are required" });
     }
-  }
 
-  res.status(200).json({ passes: passes.slice(0, 50) }); // первые 50 пролётов
+    const OBSERVER_LAT = parseFloat(lat || 55.7558); // Москва по умолчанию
+    const OBSERVER_LON = parseFloat(lon || 37.6173);
+    const DURATION_DAYS = parseInt(days || 7);
+    const MIN_ELEVATION_DEG = 10; // Минимальный угол возвышения для регистрации пролёта
+
+    const satrec = twoline2satrec(tle1, tle2);
+    const start = new Date();
+    const end = new Date(start.getTime() + DURATION_DAYS * 24 * 60 * 60 * 1000);
+    const passes = [];
+
+    const observerGd = {
+        latitude: degToRad(OBSERVER_LAT),
+        longitude: degToRad(OBSERVER_LON),
+        height: 0.05 // Высота в км (50 метров)
+    };
+
+    // --- ЛОГИКА ПРОГНОЗИРОВАНИЯ ПРОЛЁТОВ ---
+    
+    // Перебираем время с шагом 1 минута (60000 мс)
+    for (let t = new Date(start.getTime()); t.getTime() <= end.getTime(); t.setTime(t.getTime() + 60000)) {
+        
+        // 1. Пропагация орбиты
+        const positionAndVelocity = propagate(satrec, t);
+        if (positionAndVelocity.position === false) continue;
+
+        const positionEcf = satellite.eciToEcf(positionAndVelocity.position, gstime(t));
+
+        // 2. Расчет углов Az/El относительно наблюдателя (КРИТИЧЕСКИЙ ШАГ!)
+        const lookAngles = ecfToLookAngles(observerGd, positionEcf);
+        
+        const elevationRad = lookAngles.elevation;
+        const elevationDeg = elevationRad * (180 / Math.PI);
+
+        // 3. Проверка условия видимости (Elevation > 10 градусов)
+        if (elevationDeg >= MIN_ELEVATION_DEG) {
+            
+            // Если спутник виден, сохраняем точку
+            passes.push({
+                time: t.toISOString(),
+                maxEl: elevationDeg.toFixed(1), // Максимальный угол возвышения
+                azimuth: (lookAngles.azimuth * (180 / Math.PI)).toFixed(1),
+            });
+        }
+    }
+    
+    // Возвращаем результаты (ограничим до первых 50, чтобы не перегружать ответ)
+    res.status(200).json({ passes: passes.slice(0, 50) });
 }
 
 export const config = {
-  api: {
-    externalResolver: true,
-  },
+    api: {
+        externalResolver: true,
+    },
 };
-
-add api/passes.js
