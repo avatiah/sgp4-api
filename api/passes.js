@@ -1,57 +1,67 @@
-// api/passes.js — финальная рабочая версия (декабрь 2025)
-import { twoline2satrec, propagate, gstime, eciToGeodetic } from 'satellite.js';
+// api/passes.js — ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ С ИСПРАВЛЕНИЕМ ЛОГИКИ ПРОХОДОВ
+import { twoline2satrec } from 'satellite.js';
+import { calculatePasses } from 'satellite-pass-calculator';
 
 export default function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
-  const { tle1, tle2, lat = '55.7558', lon = '37.6173', days = '7' } = req.query;
-
+  // Используем new URL() для корректного парсинга параметров из Node.js
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const { searchParams } = url;
+  
+  // Получаем параметры из searchParams
+  const tle1 = searchParams.get('tle1');
+  const tle2 = searchParams.get('tle2');
+  const lat = searchParams.get('lat') || '55.7558'; // Default Москва
+  const lon = searchParams.get('lon') || '37.6173';
+  const min_el = searchParams.get('min_el') || '10'; // Минимальный угол
+  const days = searchParams.get('days') || '3'; 
+  
+  // Проверка обязательных полей
   if (!tle1 || !tle2) {
     return res.status(400).json({ error: 'tle1 и tle2 обязательны' });
   }
 
   try {
     const satrec = twoline2satrec(tle1.trim(), tle2.trim());
-
+    
+    // Начало и конец расчета
     const start = new Date();
     const end = new Date(start.getTime() + Number(days) * 86400000);
-    const passes = [];
-    let current = new Date(start);
+    
+    // Точка наблюдения
+    const observer = {
+      latitude: Number(lat),
+      longitude: Number(lon),
+      altitude: 0 // Высота над уровнем моря
+    };
 
-    while (current <= end) {
-      const result = propagate(satrec, current);
-
-      // Ключевая проверка — спасает от краша
-      if (result.position && result.velocity) {
-        const gmst = gstime(current);
-        const pos = eciToGeodetic(result.position, gmst);
-
-        const satLat = pos.latitude * 180 / Math.PI;
-        const satLon = pos.longitude * 180 / Math.PI;
-        const alt = pos.height;
-
-        if (alt > 100 && 
-           Math.abs(satLat - Number(lat)) < 25 && 
-           Math.abs(satLon - Number(lon)) < 25) {
-          passes.push({
-            time: current.toISOString(),
-            lat: satLat.toFixed(4),
-            lon: satLon.toFixed(4),
-            alt: Math.round(alt) + ' km'
-          });
-        }
-      }
-      // Шаг 3 минуты — быстро и точно
-      current.setMinutes(current.getMinutes() + 3);
-    }
+    // --- ГЛАВНОЕ ИСПРАВЛЕНИЕ: ИСПОЛЬЗОВАНИЕ calculatePasses ---
+    const rawPasses = calculatePasses({
+      satrec,
+      observer,
+      startTime: start,
+      endTime: end,
+      minElevation: Number(min_el) // ИСПОЛЬЗУЕМ MIN_EL!
+    });
+    
+    // Форматирование результата
+    const passes = rawPasses.map(p => ({
+      aos: p.start.time.toISOString(), // Время начала (Acquisition of Signal)
+      los: p.end.time.toISOString(),   // Время конца (Loss of Signal)
+      maxEl: p.max.elevation,          // Максимальная высота прохода (в градусах)
+      time: p.max.time.toISOString(),  // Время максимальной высоты
+      duration: Math.round((p.end.time.getTime() - p.start.time.getTime()) / 1000) // Длительность в секундах
+    }));
 
     res.status(200).json({
       success: true,
       location: `${lat}, ${lon}`,
       days: Number(days),
+      minElevation: Number(min_el),
       passes_found: passes.length,
-      passes: passes.slice(0, 100)
+      passes: passes.slice(0, 100) // Ограничение на 100 проходов
     });
 
   } catch (err) {
@@ -61,5 +71,3 @@ export default function handler(req, res) {
     });
   }
 }
-
-export const config = { api: { bodyParser: false } };
