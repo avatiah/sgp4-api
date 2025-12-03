@@ -1,7 +1,6 @@
 // api/passes.js — ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ С ИСПРАВЛЕНИЕМ ЛОГИКИ ПРОХОДОВ
 import { twoline2satrec } from 'satellite.js';
-import { calculatePasses } from 'satellite-js-vgs-api';
-
+import { calculatePasses } from 'sat-pass-calculator';
 export default function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
