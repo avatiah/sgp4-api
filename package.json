@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "satellite.js": "^4.1.4",
-    "sat-pass-calculator": "^1.0.0" 
-    // ^ Замените предыдущую строку на эту
+    "sat-pass-calculator": "^1.0.0"
   }
 }
