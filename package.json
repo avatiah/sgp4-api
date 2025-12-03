@@ -1,7 +1,12 @@
 {
   "name": "sgp4-pass-calculator",
-  ...
-  "dependencies": {  // <- Только двойные кавычки
+  "version": "1.0.0",
+  "description": "Serverless SGP4 pass calculator",
+  "main": "api/passes.js",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "dependencies": {
     "satellite.js": "^4.1.4"
   }
 }
