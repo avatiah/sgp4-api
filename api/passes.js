@@ -1,12 +1,10 @@
-// api/passes.js - ФИНАЛЬНАЯ ВЕРСИЯ С ТОЧНЫМ РАСЧЕТОМ УГЛА ВОЗВЫШЕНИЯ
+// api/passes.js - ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ С ТОЧНЫМ РАСЧЕТОМ УГЛА И ОЧИСТКОЙ TLE
 import { 
     twoline2satrec, 
     propagate, 
     gstime, 
-    eciToGeodetic, 
-    radiansToDegrees,
     degreesToRadians,
-    dopplerFactor, 
+    radiansToDegrees,
     eciToEcf,
     ecfToLookAngles
 } from 'satellite.js';
@@ -19,24 +17,36 @@ export default function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', 'application/json');
 
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    const { searchParams } = url;
-    
-    // Получение и приведение типов параметров
-    const tle1 = searchParams.get('tle1');
-    const tle2 = searchParams.get('tle2');
-    const lat = Number(searchParams.get('lat') || '32.0853');
-    const lon = Number(searchParams.get('lon') || '34.7818');
-    const min_el = Number(searchParams.get('min_el') || '10');
-    const days = Number(searchParams.get('days') || '3'); 
-    const altObserver = Number(searchParams.get('alt') || '0');
-
-    if (!tle1 || !tle2) {
-        return res.status(400).json({ error: 'tle1 и tle2 обязательны' });
-    }
-
     try {
-        const satrec = twoline2satrec(tle1.trim(), tle2.trim());
+        // Используем new URL() для корректного парсинга параметров
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const { searchParams } = url;
+        
+        // Получение и приведение типов параметров
+        const tle1 = searchParams.get('tle1');
+        const tle2 = searchParams.get('tle2');
+        const lat = Number(searchParams.get('lat') || '32.0853');
+        const lon = Number(searchParams.get('lon') || '34.7818');
+        const min_el = Number(searchParams.get('min_el') || '10');
+        const days = Number(searchParams.get('days') || '3'); 
+        const altObserver = Number(searchParams.get('alt') || '0');
+
+        if (!tle1 || !tle2) {
+            return res.status(400).json({ error: 'tle1 и tle2 обязательны' });
+        }
+
+        // --- УСИЛЕННАЯ ОЧИСТКА TLE ---
+        const cleanTle1 = tle1.replace(/\s+/g, ' ').trim();
+        const cleanTle2 = tle2.replace(/\s+/g, ' ').trim();
+        const satrec = twoline2satrec(cleanTle1, cleanTle2);
+
+        // --- ПРОВЕРКА ОШИБКИ SGP4 ---
+        if (satrec.error) {
+             return res.status(500).json({ 
+                 error: 'Ошибка инициализации SGP4', 
+                 details: satrec.error
+             });
+        }
         
         // Точка наблюдения в радианах
         const observerCoords = {
@@ -60,9 +70,9 @@ export default function handler(req, res) {
             if (result.position && result.velocity) {
                 const gmst = gstime(currentTime);
                 
-                // --- ГЛАВНОЕ ИСПРАВЛЕНИЕ: ТОЧНЫЙ РАСЧЕТ УГЛА ---
+                // --- ТОЧНЫЙ РАСЧЕТ УГЛА ВОЗВЫШЕНИЯ (ELEVATION) ---
                 
-                // 1. Преобразование ECI -> ECF
+                // 1. Преобразование ECI -> ECF (необходимо для расчета углов)
                 const positionEcf = eciToEcf(result.position, gmst);
 
                 // 2. Расчет углов видимости (Elevation, Azimuth, Range)
@@ -106,6 +116,7 @@ export default function handler(req, res) {
                     }
                 }
             } else {
+                 // Спутник упал или TLE невалидны
                  if (isVisible) {
                      isVisible = false;
                      currentPass = null;
@@ -127,7 +138,7 @@ export default function handler(req, res) {
 
     } catch (err) {
         res.status(500).json({ 
-            error: 'Расчёт не удался', 
+            error: 'Общая ошибка API', 
             details: err.message 
         });
     }
